@@ -1,9 +1,11 @@
+# %%
 import csv
 import numpy as np
 import pandas as pd
 import random
 import time
 import datetime
+from tqdm.notebook import *
 
 import rideshare_algo
 from vehicle import *
@@ -11,6 +13,8 @@ from request import *
 import searching
 import calculate_min_routing
 from Waypoint import WayPoint, MapSystem
+
+random.seed(42); np.random.seed(42) ## for debugging
 
 '''Parameter Setting'''
 eps = 1e-6
@@ -25,7 +29,7 @@ H = 2 * 3600 // period_length #i.e. number of periods in 2-hour horizon
 TAXI_TOTAL_NUM = 2000
 CAPACITY = 4 #i.e. maximum capacity of vehicles
 ACTIVE_CONSTANT_WEIGHT = 1 #i.e. weightage for trip benefits (active time) compared to the loss (cruising time)
-MAX_WAITING_TIME = 150 #i.e. maximum waiting time for request before picked up
+MAX_WAITING_TIME = 150  ##150 #i.e. maximum waiting time for request before picked up
 MAX_SERVE_NUM = 1 #i.e. maximum number of requests to be served together by 1 vehicle
 REMOVAL = 500 #i.e. set the allowance for trip removal to manage the network sparsity problems
 
@@ -79,7 +83,7 @@ traveltime.columns = [HOUR]
 tmp_list = list(traveltime[HOUR])
 tot_num = 0
 
-for n1, n2 in zip(traveltime.index.get_level_values(0), traveltime.index.get_level_values(1)):
+for n1, n2 in zip(tqdm(traveltime.index.get_level_values(0)), traveltime.index.get_level_values(1)):
     
     tt_dict[(n1, n2)] = tmp_list[tot_num]
     node_dict[(n1,n2)] = tot_num
@@ -92,7 +96,7 @@ tt_list += [list(tt_dict.values())]
 #------------------------------------------------------------------------------
 '''Reading Request Data'''
 
-REQ_DATA = pd.read_pickle('..\\..\\Data\\RequestGenerator\\May_2013_HOUR17.pkl')
+REQ_DATA = pd.read_pickle('..\\..\\Data\\RequestGenerator\\May_2013_HOUR17.pkl')  ## small
 
 #------------------------------------------------------------------------------
 '''Function lists:
@@ -101,6 +105,10 @@ REQ_DATA = pd.read_pickle('..\\..\\Data\\RequestGenerator\\May_2013_HOUR17.pkl')
     for route recording (see l.116-124, 133-140), and accumulated historical active time (see l.127)
     3. compute_routing - take in available taxis and coming requests & output 
     optimal (dependent on specified efficiency-fairness conditions) routes'''
+
+# %%
+import rideshare_algo
+import importlib; importlib.reload(rideshare_algo)
 
 def closest_node(loc):
 
@@ -111,7 +119,8 @@ def closest_node(loc):
     dist_2 = np.sum((nodes - loc)**2, axis=1)
     pos = np.argmin(dist_2)
     
-    return manhat_point.index[pos]
+    return manhat_point.index[pos] 
+
 
 def status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME):
     
@@ -135,7 +144,7 @@ def status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME):
             if moving_time < 0:
                 break
 
-            if p_or_d == 0:
+            if p_or_d == 0:  ## pickup
                 
                 if UpdateLabel:
                     reached, moving_time = mapsystem.move_to_destination(cur_v._waypoint, cur_r._origin_waypoint, moving_time)
@@ -149,7 +158,9 @@ def status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME):
                         
                     else:
                         cur_v.update_allocated(moving_time - prev_moving_time) #i.e. to update 'realized' trip active time
-                        
+                        ## time spent on the trip
+                        ## if reassigned
+
                     if reached:
                         cur_v.picking_up(cur_r)                    
                         cur_r.picking_up(t - moving_time)
@@ -189,10 +200,9 @@ def status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME):
             prev_moving_time = moving_time
 
 
-
 def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALLOC):
     
-    global req_pos
+    global req_pos, All_edges
     print('req_pos bf:', req_pos)
     
     for i in range(req_pos, len(REQ_STORAGE)):
@@ -216,6 +226,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     tot_num = 0
     all_num = 0
     
+    time0 = time.clock()
     for v in TAXI_LIST:
         for r in v.boarded_requests:
             all_num += 1
@@ -232,6 +243,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
                 r.set_destination_id(tot_num)
                 wp_list += [r._destination_waypoint]
                 tot_num += 1
+    print('O(VR) t =', time.clock() - time0)
 
     for r in DEMAND_LIST:
         all_num += 2
@@ -280,20 +292,26 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
 
 
     '''Create bipartite graph and other information to be passed into the main algorithm'''
+    global feasible, route, min_cost, total_length, idle, RTV_graph
     RTV_graph = {} #i.e. built based on constraints specified below (see l.211-212, 218-219)
     All_edges = []
     Sorting_weight = [] #i.e. for fairness; needs to account for historical values accumulated by each vehicle
     Value_weight = [] #i.e. for efficiency; needs to capture the maximization of service rate (see l.198 adding in large constant), 
+    Carbon_weight = []  ## carbons
     #wlog it disregards history
     
     NEW_TAXI_LIST = []
 
+    
+    time0 = time.clock()
     for v in TAXI_LIST:
         
         '''Not supporting reassignment,the following case leads to direct addition to FIN_ALLOC'''
+        ## already full
         if len(v._boarded_requests) + len(v._assigned_requests) == MAX_SERVE_NUM:            
             r_list = v._assigned_requests
             feasible, route, min_cost, total_length, idle = calculate_min_routing.calc_min_routing(v, r_list, t, mapsystem, cur_network)
+            ##print('debug', feasible, route, min_cost, total_length, idle)
             active = ACTIVE_CONSTANT_WEIGHT * total_length - idle
             
             RTV_graph[v._vid] = {- v._vid - 1: [route, active, idle]}
@@ -316,9 +334,16 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
             
             r_list = v._assigned_requests + []
             assigned_sum = ACTIVE_CONSTANT_WEIGHT * sum([r0._trip_length for r0 in r_list])
-            
+            ## expected value of alr-assigned requests(?)
+
+
             Sorting_weight += [v._allocated_value1 + assigned_sum - idle]
             Value_weight += [cardinal_const + assigned_sum - idle]
+            ##  somehow this represents an empty request (what does the vehicle do?)
+            ##      why is vehicle's eff. 
+            ##      what is a "cardinal constant" in general, anyway?
+            ##  cardinal_const maybe to make it nonnegative
+            Carbon_weight += [assigned_sum]  ## check
             remaining_space = CAPACITY
             
             if len(v.boarded_requests) == 1:
@@ -326,9 +351,10 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
                     remaining_space -= r._size
 
             '''Non-empty trips - support appending of 1 request per vehicle per round due to the nature of bipartite graph'''
+            ## ok, adding on to vehicles with at least 1 assignment
             for r in DEMAND_LIST:
 
-                if r._assigned == True:
+                if r._assigned == True:  ## haha srsly
                     continue
 
                 if r._size > remaining_space:
@@ -340,7 +366,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
                 
                 if feasible == 0 or r._trip_length - idle < 0:
                     continue
-                else:
+                else:  ## is feasible
                     
                     RTV_graph[v._vid][r._rid] = [route, active, idle]
                     
@@ -348,9 +374,12 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
                     
                     r_list = v._assigned_requests + [r]
                     assigned_sum = ACTIVE_CONSTANT_WEIGHT * sum([r0._trip_length for r0 in r_list])
-            
+                    ## if we add on this request, some more
+
                     Sorting_weight += [v._allocated_value1 + assigned_sum - idle]
                     Value_weight += [cardinal_const + assigned_sum - idle]
+                    Carbon_weight += [assigned_sum]
+    print('last for loop: t =', time.clock() - time0)
 
     '''Recording purposes'''
     hist_act = [v._active_timecost for v in TAXI_LIST]
@@ -364,12 +393,41 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     print('NUM OF NEW TAXI LIST:', len(NEW_TAXI_LIST))
     #--------------------------------------------------------------------------
     '''Solving for optimal routes'''
+    time0 = time.clock()
     if len(NEW_TAXI_LIST) > 0:
+        
+        nReq, nVeh = len(REQ_STORAGE), len(NEW_TAXI_LIST)
+        ## from data_handling_new
+        """mileages = np.random.normal(2, 0.4, nVeh)  # hardcoded
+        mileages = 10 ** mileages
+        Distances = num...
+
+        carbon = mileages[np.array(All_edges)[:, 0]] * np.array(Distances)
+        eff_matrix, carb_matrix = np.zeros([nReq, nVeh+nReq])-1e6, np.zeros([nReq, nVeh+nReq])+1e6 # flip to requests to vehicles
+
+        All_edges, Value_weight, Carbon_weigght = np.array(All_edges), np.array(Value_weight), np.array(Carbon_weight)
+        mask = np.where(All_edges[:, 1] < 0)  # for deletion
+        print(mask)
+        All_edges = np.delete(All_edges, mask, axis=0)
+        Value_weight = np.delete(Value_weight, mask)
+        carbon = np.delete(carbon, mask)
+        print(np.where(All_edges<0))
+        
+        eff_matrix[All_edges[:, 1], All_edges[:, 0]] = Value_weight
+        carb_matrix[All_edges[:, 1], All_edges[:, 0]] = carbon
+        
+        eff_matrix[np.arange(nReq), nVeh+np.arange(nReq)] = 0
+        carb_matrix[np.arange(nReq), nVeh+np.arange(nReq)] = 0
+        print('\n=============\n', eff_matrix, '\n\n', carb_matrix,'\n=============\n')
+        print('RTV_graph', RTV_graph)"""
         route_dict, value_sum, ilp_discr, min_driver = rideshare_algo.solve_rtv_graph(h, H, CAPACITY, RTV_graph, NEW_TAXI_LIST, DEMAND_LIST,
                                                                                       All_edges, Sorting_weight, Value_weight, act_corr, min_vid, t)
+        #assignment = rideshare_algo.mine(h, H, eff_matrix, carbon_matrix)
+        ##  line I want to replace ^
     else:
         route_dict, value_sum, ilp_discr, min_driver = [{}, 0, 0, 0]
-    
+    print('solving t =', time.clock() - time0)
+
     act_list = [v._allocated_value1 for v in V_STORAGE]
     min_driver = min(act_list)
     ilp_discr = np.std(act_list)
@@ -379,6 +437,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     unassigned_supply = []
 
     '''Storing the optimal routes (i.e. route_dict) into FIN_ALLOC & updating of vehicle/request attributes'''
+    time0 = time.clock()
     for vid in route_dict:
         if list(route_dict[vid]) == []:
             unassigned_supply += [vid]
@@ -390,7 +449,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
         for (rid, p_or_d) in FIN_ALLOC[vid]:
             cur_r = REQ_STORAGE[rid]
             
-            if p_or_d == 0:
+            if p_or_d == 0:  ## pickup 
                 cur_r.assigning(vid,t)
                 
                 if float(MAX_WAITING_TIME - cur_r._max_waiting_time) < eps:
@@ -403,6 +462,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
         
         if cur_v.isidle:
             idle_taxis += [cur_v]
+    print('updating t =', time.clock() - time0)
         
     for vid in FIN_ALLOC:
         V_STORAGE[vid]._overall_time = t
@@ -410,19 +470,21 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     print('------------------------------------------------------------------')
     print('UNASSIGNED TAXIS',len(unassigned_supply))
     print('IDLE TAXIS', len(idle_taxis))
-        
+         
     return value_sum, ilp_discr, min_driver    
 
-#------------------------------------------------------------------------------
 
-for day in SIMULATION_DAY:
+#print("actual cell starting!")
+for day in SIMULATION_DAY[0:1]:
     print('DAY:', day)
     REQ_DATA1 = REQ_DATA[REQ_DATA['bydates'] == datetime.date(2013, 5, day)]
 
+    ## in the end: no lat limits
     for lat_min, lat_max in zip(MIN_LIST, MAX_LIST):
         print('(LAT_MIN, LAT_MAX):', (lat_min, lat_max))
         print('-------')
 
+        print('here-1')
         '''Restricting Region of Real Data'''
         if DATA_TYPE == 'WHOLE':
             REQ_DATA0 = REQ_DATA1
@@ -434,13 +496,15 @@ for day in SIMULATION_DAY:
                                for i in range(len(REQ_DATA1))]
 
             REQ_DATA0 = REQ_DATA1[restrict_region]
+        print('here0')
 
-        if len(REQ_DATA0) <= 1000:
+        if len(REQ_DATA0) <= 1000:  ## disable for now
             continue
         
         valid_data = REQ_DATA0[REQ_DATA0['trip_length'] >= MAX_WAITING_TIME]
         ORI_REQ_NUM = len(valid_data)
         print('NUMREQ from valid_data:', ORI_REQ_NUM)
+        print('here1')
         
         node_to_num = {}
         for node in set(valid_data['pickup_nodes']):
@@ -448,6 +512,7 @@ for day in SIMULATION_DAY:
             node_to_num[node] = num
 
         '''Removal of trips that possibly cause vehicles to be stuck for lengthened period'''
+        ##REMOVAL = 'None'  ## tmp
         if REMOVAL != 'None':
             pu_nodes = np.array(list(set(valid_data['pickup_nodes'])))
             valid_dest = {}
@@ -482,22 +547,25 @@ for day in SIMULATION_DAY:
             num_to_node[num] += [node]
 
         total_keynum = sum(num_to_node.keys())
-        
-        '''Choose 2 'popular'nodes based on trip (request) data'''
+        print('here2')
+
+        '''Choose 2 'popular' nodes based on trip (request) data'''
         node_to_num = []
         for node in set(valid_data['pickup_nodes']):
             num = len(valid_data[valid_data['pickup_nodes'] == node])
             node_to_num += [(num,node)]
         
-        POPULAR_NODE1 = sorted(node_to_num)[0]
-        POPULAR_NODE2 = sorted(node_to_num)[1]
+        if len(node_to_num)>2: ## unpopular, rather
+            POPULAR_NODE1 = sorted(node_to_num)[0]
+            POPULAR_NODE2 = sorted(node_to_num)[1]
         #----------------------------------------------------------------------
         '''Weight types (to balance the efficiency-fairness effect)
         1. Constant: w = [0] + list(np.linspace(.7,1,4)) + [.92, .95, .97]; weight_trial = [w for i in range(H)]
         2. Increasing: w = np.linspace(0, .9, 10); weight_trial = np.linspace(w, 1, H)
         3. Binary: w = [int(H - math.sqrt(H)), int(3/4*H), int(H/2), int(H/4)]; weight_trial = [0 for period in range(w)] + [1 for period in range(H-w)]'''
         
-        for w in [0] + list(np.linspace(.7,1,4)) + [.92, .95, .97]:
+        print('here')
+        for w in [0]:  ##+ list(np.linspace(.7,1,4)) + [.92, .95, .97]:
 
             req_pos = 0
             weight_trial = [w for i in range(H)]
@@ -517,11 +585,11 @@ for day in SIMULATION_DAY:
             loc_id = [random.randint(0, len(v_location) - 1) for i in range(TAXI_TOTAL_NUM)]
             V_STORAGE = np.array([Vehicle(i,v_location[loc_id[i]],CAPACITY) for i in range(TAXI_TOTAL_NUM)])    
             
-            for vid in range(len(V_STORAGE)):
+            for vid in range(len(V_STORAGE)):  ## init location, set up V_STORAGE together with ^
                 v = V_STORAGE[vid]
                 v._point_id = closest_node(v._cur_position)
                 
-                if RANDOM_VEHICLE_POS_START == False:
+                if RANDOM_VEHICLE_POS_START == False:  ## start at 0, 0
                     v._waypoint = WayPoint(v._point_id, v._point_id, 0., 0.)
                 else:
                     v._waypoint = mapsystem.GEN_START_POINT(v._point_id, 60)
@@ -534,7 +602,7 @@ for day in SIMULATION_DAY:
             REQ_STORAGE = np.array([]) #store generated new requests
             TEMP_STORAGE = []
                 
-            for i in valid_data.index:
+            for i in valid_data.index:  ## valid_data: Database of trips --> TEMP_STORAGE
                 region = 'None'
                 origin = valid_data.loc[i, 'pickup_coordinates']
                 destination = valid_data.loc[i, 'dropoff_coordinates']
@@ -543,9 +611,9 @@ for day in SIMULATION_DAY:
                 pass_count = valid_data.loc[i, ' passenger_count']
 
                 TEMP_STORAGE += [(arr_time, -trip_length, region, origin, destination, pass_count, i)]
-
             TEMP_STORAGE.sort()
 
+            ## setting up new_requests --> REQ_STORAGE
             for (arr_time, trip_length, region, origin, destination, pass_count, i) in TEMP_STORAGE:
                 req_ID = len(REQ_STORAGE)
 
@@ -575,19 +643,25 @@ for day in SIMULATION_DAY:
             STACKED_TIME = [[] for i in range(TAXI_TOTAL_NUM)]
             weight_list = weight_trial
 
-            for h in range(1, H+1):
-
+            print('there')
+            ## what to do every period, itself
+            for h in trange(1, H+1, unit='period'):
+                v = V_STORAGE[34]
+                if v._assigned_requests: r = v._assigned_requests[0]
                 print('PERIOD', h)
                 print('===========================================')
                 
-                act_corr = weight_list[h-1]
-                t = h*period_length
+                act_corr = weight_list[h-1]  ## fairness-eff. weight?
+                t = h*period_length  ## time past
                 FIN_ALLOC = {}
                 
                 DEMAND_LIST = [r for r in DEMAND_LIST if r._assigned == True]
                 
+                time0 = time.clock()
                 ILP_VALUE, ILP_DISCR, MIN_DRIVER = compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALLOC)
-                
+                print('compute_routing t =', time.clock() - time0)
+
+                print('v._allocated_value1:', v._allocated_value1)  ##
                 list_normal = [v._allocated_value1 for v in V_STORAGE] #i.e. store accumulated value (active time) for whole horizon
                 
                 print('normal')
@@ -595,7 +669,7 @@ for day in SIMULATION_DAY:
                 print('minmax:', (np.min(list_normal), np.max(list_normal)))
                 print('----')
                 
-                if h < H:
+                if h < H:  ## if not the last period, status_update
                     t = (h+1)*period_length
                     status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME)
                 
@@ -646,3 +720,5 @@ for day in SIMULATION_DAY:
             writer = csv.writer(f)
             writer.writerows(to_append)
             f.close()
+
+# %%

@@ -11,11 +11,11 @@ def calc_min_routing(v: Vehicle, r: list, cur_time, map: MapSystem, cur_network:
     Todo = []
     min_time_cost = 0
 
-    for x in v.boarded_requests:
+    for x in v.boarded_requests:  ## setting up min_times (bounds)
         Todo += [(x.get_destination_id, x.latest_dropoff_time(map), x.get_id, 1, 1)]
         min_time_cost += searching.distance(v.get_point_id, x.get_destination_id, cur_network)
 
-    if r == -1:
+    if r == -1:  ## what does r = -1 mean?
         feasible, min_cost, routing, end_time, idle_time = searching.check_feasible(cur_time=cur_time, cur_pos=v.get_point_id,
                                                                           dst_list=Todo, now_cost=0. - min_time_cost,
                                                                           time_cost_network=cur_network)
@@ -43,5 +43,5 @@ def calc_min_routing(v: Vehicle, r: list, cur_time, map: MapSystem, cur_network:
                                                                           dst_list=Todo, now_cost=0. - min_time_cost,
                                                                           time_cost_network=cur_network)
         totel_length = end_time - cur_time
-
+        
         return feasible, routing, min_cost, totel_length, idle_time

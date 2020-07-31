@@ -129,7 +129,7 @@ class Vehicle:
         else:
             self._boarded_requests.remove(req)
 
-    def update_allocated(self, incr1):
+    def update_allocated(self, incr1):  ## trip_length, moving_time - prev_moving
         self._allocated_value1 += incr1
     
     '''Output'''

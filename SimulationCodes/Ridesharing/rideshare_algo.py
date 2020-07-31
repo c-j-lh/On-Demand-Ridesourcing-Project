@@ -75,7 +75,10 @@ def ReallocAlgo(lmbd, M_eff, M_fair, act_eff, act_fair, min_eff, min_fair, taxi_
     return M_fin
         
 def match_func(w, all_left, all_right):
+    global match_tmp
+    import time; time0 = time.clock()
     match_tmp = list(HA.maxWeightMatching(w))
+    print('HA.mwm t =', time.clock() - time0)
 
     match_sol = []
     unassigned_v = []
@@ -107,10 +110,12 @@ def match_func(w, all_left, all_right):
 
     return match_sol
 
+
 def solve_rtv_graph(h, H, capacity, rtv, taxi_list, demand_list, all_edges, sorting_weight,
                     value_weight, lmbd, min_vid, cur_time):
-
+    global w0
     '''To store all possible solutions and their corresponding measures'''
+    #print('All_edges', all_edges)
     END_SOLUTIONS = []
     TOT_VALUE = []
     TOT_VARIANCE = []
@@ -120,6 +125,7 @@ def solve_rtv_graph(h, H, capacity, rtv, taxi_list, demand_list, all_edges, sort
     taxi_id = [v._vid for v in taxi_list]
     demand_id = [r._rid for r in demand_list]
 
+    global all_left, all_right, all_edges_; all_edges_ = all_edges
     all_left, all_right = zip(*all_edges)
     all_right = list(set(all_right))
     all_left = list(set(all_left))
@@ -145,7 +151,9 @@ def solve_rtv_graph(h, H, capacity, rtv, taxi_list, demand_list, all_edges, sort
         print('===========================')
         print('iter', iter_num)
         
+        import time; time0 = time.clock()
         match_sol = match_func(w0, all_left, all_right)
+        print('\t\t\tmatch_func {iter_num:3d} t =', time.clock() - time0)
         act_list = [sorting_weight[all_edges.index(list(e))] for e in match_sol]                
             
         '''Recording solutions'''
@@ -249,5 +257,66 @@ def solve_rtv_graph(h, H, capacity, rtv, taxi_list, demand_list, all_edges, sort
         else:
             reaching_time, rid, p_or_d, cost = zip(*rtv[vid][rid][0])
             route_dict[vid] = tuple(list(zip(rid, p_or_d)))
-        
+    
+    ##print('route_dict', route_dict)
     return [route_dict, tot_value, np.std(act_list), np.min(act_list)]
+
+def mine(h, H:int, eff_matrix, carbon_matrix):
+    from scipy.optimize import linear_sum_assignment
+    row_ind, vehicles = linear_sum_assignment(eff_matrix, maximize=True) # M_eff
+    # E(M_eff) and C(M_eff) for swapping from
+    efficiency_orig = eff_matrix[row_ind, vehicles].sum()
+    carbon_orig = carb_matrix[row_ind, vehicles].sum()
+    vehicles = vehicles.tolist()
+    #print(f'M_eff : {carbon_orig:8.3f} {efficiency_orig:8.3f}', np.array(vehicles) if verbose else '')
+
+
+    row_ind_mcarb, vehicles_mcarb = linear_sum_assignment(carb_matrix) # M_carb
+    # E(M_carb) and C(M_carb) just for reference
+    efficiency_mcarb = eff_matrix[row_ind_mcarb, vehicles_mcarb].sum()
+    carbon_mcarb = carb_matrix[row_ind_mcarb, vehicles_mcarb].sum()
+    vehicles_mcarb = vehicles_mcarb.tolist()
+
+
+    low = 0.00
+    hi = 1.e5
+    carbon_max = carbon_orig * 0.9
+
+    prev_efficiency = efficiency_mcarb
+    stable_count = 0
+    count = 0
+    init_stable = True
+    
+    check = ()
+    last_change.append([0, 0])
+    while stable_count<10 or count<20 or init_stable:
+        #if not (stable_count<10 or count<10 or init_stable) and not check:
+        #    check = carbon, efficiency, req_, vehicles_
+        mu = (low+hi)/2
+        req_, vehicles_ = linear_sum_assignment(eff_matrix - mu * carb_matrix, maximize=True)
+        efficiency = eff_matrix[req_, vehicles_].sum()
+        carbon = carb_matrix[req_, vehicles_].sum()
+
+        #print(carbon, carbon_max)
+        if carbon < carbon_max:
+            hi = mu
+            last_hi = carbon, efficiency, req_, vehicles_
+        elif carbon > carbon_max:
+            low = mu
+            last_low = carbon, efficiency, req_, vehicles_
+        else:
+            break
+        #print(f'{low:20f} {hi:20f} {mu:20f}: {carbon:8f} {efficiency:8.3f}', np.array(vehicles_)  if verbose else '')
+
+        if abs(prev_efficiency-efficiency) < 1e-3:
+            stable_count += 1
+        else:
+            last_change[-1][0] = count
+            last_change[-1][1] = max(last_change[-1][1], stable_count)
+            stable_count = 0
+            init_stable = False
+        prev_efficiency = efficiency
+        count += 1
+    carbon_hi, efficiency_hi, req_hi, vehicles_hi = last_hi
+    carbon_low, efficiency_low, req_low, vehicles_low = last_low
+    return req_hi, vehicles_hi

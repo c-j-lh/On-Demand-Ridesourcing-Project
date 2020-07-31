@@ -263,6 +263,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     print('NUM OF REQUESTS:', len(DEMAND_LIST))
     
     '''Solving for optimal route'''
+    print('testing', np.array(All_edges), np.array(Value_weight))
     if len(NEW_TAXI_LIST) > 0:
         route_dict = bipartite_algo.solve_rtv_graph(h, H, RTV_graph, NEW_TAXI_LIST, DEMAND_LIST, All_edges, Sorting_weight, Value_weight, act_corr, c)
     else:

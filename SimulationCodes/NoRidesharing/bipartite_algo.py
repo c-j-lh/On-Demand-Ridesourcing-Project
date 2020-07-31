@@ -71,9 +71,9 @@ def ReallocAlgo(lmbd, M_eff, M_fair, act_eff, act_fair, min_eff, min_fair, taxi_
     M_fin = list(zip(V_fin, R_fin))
     
     return M_fin
-    
+
+
 def match_func(w, all_left, all_right):
-            
     match_tmp = list(HA.maxWeightMatching(w))
 
     match_sol = []
