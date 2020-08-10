@@ -119,7 +119,7 @@ def closest_node(loc):
     dist_2 = np.sum((nodes - loc)**2, axis=1)
     pos = np.argmin(dist_2)
     
-    return manhat_point.index[pos] 
+    return manhat_point.index[pos]
 
 
 def status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME):
@@ -396,13 +396,14 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
     time0 = time.clock()
     if len(NEW_TAXI_LIST) > 0:
         
-        nReq, nVeh = len(REQ_STORAGE), len(NEW_TAXI_LIST)
+        nReq, nVeh = len(DEMAND_LIST), len(NEW_TAXI_LIST)
         ## from data_handling_new
-        """mileages = np.random.normal(2, 0.4, nVeh)  # hardcoded
+        #"""
+        mileages = np.random.normal(2, 0.4, nVeh)  # hardcoded
         mileages = 10 ** mileages
-        Distances = num...
+        #Distances = num...
 
-        carbon = mileages[np.array(All_edges)[:, 0]] * np.array(Distances)
+        #carbon = mileages[np.array(All_edges)[:, 0]] * np.array(Distances)
         eff_matrix, carb_matrix = np.zeros([nReq, nVeh+nReq])-1e6, np.zeros([nReq, nVeh+nReq])+1e6 # flip to requests to vehicles
 
         All_edges, Value_weight, Carbon_weigght = np.array(All_edges), np.array(Value_weight), np.array(Carbon_weight)
@@ -410,19 +411,30 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
         print(mask)
         All_edges = np.delete(All_edges, mask, axis=0)
         Value_weight = np.delete(Value_weight, mask)
-        carbon = np.delete(carbon, mask)
+        #carbon = np.delete(carbon, mask)
         print(np.where(All_edges<0))
         
         eff_matrix[All_edges[:, 1], All_edges[:, 0]] = Value_weight
-        carb_matrix[All_edges[:, 1], All_edges[:, 0]] = carbon
+        #carb_matrix[All_edges[:, 1], All_edges[:, 0]] = carbon
         
+        for v, dct in RTV_graph.items():
+            for req, lst in dct.items():
+                if len(lst[0]) != 2:
+                    #print('warning', v, req)
+                    continue
+                up, down = lst[0]
+                up, down = up[0], down[0]
+                diff = down - up
+                carb_matrix[req][v] = mileages[v] * diff
+
         eff_matrix[np.arange(nReq), nVeh+np.arange(nReq)] = 0
         carb_matrix[np.arange(nReq), nVeh+np.arange(nReq)] = 0
         print('\n=============\n', eff_matrix, '\n\n', carb_matrix,'\n=============\n')
-        print('RTV_graph', RTV_graph)"""
-        route_dict, value_sum, ilp_discr, min_driver = rideshare_algo.solve_rtv_graph(h, H, CAPACITY, RTV_graph, NEW_TAXI_LIST, DEMAND_LIST,
-                                                                                      All_edges, Sorting_weight, Value_weight, act_corr, min_vid, t)
-        #assignment = rideshare_algo.mine(h, H, eff_matrix, carbon_matrix)
+        #print('RTV_graph', RTV_graph) 
+        ##"""
+        #route_dict, value_sum, ilp_discr, min_driver = rideshare_algo.solve_rtv_graph(h, H, CAPACITY, RTV_graph, NEW_TAXI_LIST, DEMAND_LIST,
+        #                                                                              All_edges, Sorting_weight, Value_weight, act_corr, min_vid, t)
+        assignment = rideshare_algo.mine(h, H, eff_matrix, carb_matrix)
         ##  line I want to replace ^
     else:
         route_dict, value_sum, ilp_discr, min_driver = [{}, 0, 0, 0]
@@ -673,6 +685,10 @@ for day in SIMULATION_DAY[0:1]:
                     t = (h+1)*period_length
                     status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME)
                 
+                for r in REQ_STORAGE:  ##
+                    if r.is_picked:
+                        raise BaseException(f"{r._rid}")
+
             served_reqs = [r._rid for r in REQ_STORAGE if (r._assigned == True or r._picked == True or r._finished == True)]
             finished_reqs = [r for r in REQ_STORAGE if r._finished == True]
             picked_reqs = [r for r in REQ_STORAGE if r._pickup_time != None]

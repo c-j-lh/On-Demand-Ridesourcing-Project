@@ -261,7 +261,7 @@ def solve_rtv_graph(h, H, capacity, rtv, taxi_list, demand_list, all_edges, sort
     ##print('route_dict', route_dict)
     return [route_dict, tot_value, np.std(act_list), np.min(act_list)]
 
-def mine(h, H:int, eff_matrix, carbon_matrix):
+def mine(h, H:int, eff_matrix, carb_matrix):
     from scipy.optimize import linear_sum_assignment
     row_ind, vehicles = linear_sum_assignment(eff_matrix, maximize=True) # M_eff
     # E(M_eff) and C(M_eff) for swapping from
@@ -288,7 +288,7 @@ def mine(h, H:int, eff_matrix, carbon_matrix):
     init_stable = True
     
     check = ()
-    last_change.append([0, 0])
+    #last_change.append([0, 0])
     while stable_count<10 or count<20 or init_stable:
         #if not (stable_count<10 or count<10 or init_stable) and not check:
         #    check = carbon, efficiency, req_, vehicles_
@@ -311,8 +311,8 @@ def mine(h, H:int, eff_matrix, carbon_matrix):
         if abs(prev_efficiency-efficiency) < 1e-3:
             stable_count += 1
         else:
-            last_change[-1][0] = count
-            last_change[-1][1] = max(last_change[-1][1], stable_count)
+            #last_change[-1][0] = count
+            #last_change[-1][1] = max(last_change[-1][1], stable_count)
             stable_count = 0
             init_stable = False
         prev_efficiency = efficiency
