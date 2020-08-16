@@ -424,7 +424,7 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
                     continue
                 up, down = lst[0]
                 up, down = up[0], down[0]
-                diff = down - up
+                diff = down - up  ## time
                 carb_matrix[req][v] = mileages[v] * diff
 
         eff_matrix[np.arange(nReq), nVeh+np.arange(nReq)] = 0
@@ -487,254 +487,260 @@ def compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALL
 
 
 #print("actual cell starting!")
-for day in SIMULATION_DAY[0:1]:
-    print('DAY:', day)
-    REQ_DATA1 = REQ_DATA[REQ_DATA['bydates'] == datetime.date(2013, 5, day)]
+##for day in SIMULATION_DAY[0:1]:
+##print('DAY:', day)
+REQ_DATA1 = REQ_DATA[REQ_DATA['bydates'] == datetime.date(2013, 5, day)]
 
-    ## in the end: no lat limits
-    for lat_min, lat_max in zip(MIN_LIST, MAX_LIST):
-        print('(LAT_MIN, LAT_MAX):', (lat_min, lat_max))
-        print('-------')
+## in the end: no lat limits
+##for lat_min, lat_max in zip(MIN_LIST, MAX_LIST):
+lat_min, lat_max = -float('inf'), float('inf')
+## whole code dedented 2ce
+print('(LAT_MIN, LAT_MAX):', (lat_min, lat_max))
+print('-------')
 
-        print('here-1')
-        '''Restricting Region of Real Data'''
-        if DATA_TYPE == 'WHOLE':
-            REQ_DATA0 = REQ_DATA1
-        else:
-            restrict_region = [list(REQ_DATA1['pickup_coordinates'].iloc[i])[1] < lat_max + eps and
-                               list(REQ_DATA0['dropoff_coordinates'].iloc[i])[1] <= lat_max and
-                               list(REQ_DATA1['pickup_coordinates'].iloc[i])[1] > lat_min - eps and
-                               list(REQ_DATA0['dropoff_coordinates'].iloc[i])[1] >= lat_min
-                               for i in range(len(REQ_DATA1))]
+print('here-1')
+'''Restricting Region of Real Data'''
+if DATA_TYPE == 'WHOLE':
+    REQ_DATA0 = REQ_DATA1
+else:
+    restrict_region = [list(REQ_DATA1['pickup_coordinates'].iloc[i])[1] < lat_max + eps and
+                        list(REQ_DATA0['dropoff_coordinates'].iloc[i])[1] <= lat_max and
+                        list(REQ_DATA1['pickup_coordinates'].iloc[i])[1] > lat_min - eps and
+                        list(REQ_DATA0['dropoff_coordinates'].iloc[i])[1] >= lat_min
+                        for i in range(len(REQ_DATA1))]
 
-            REQ_DATA0 = REQ_DATA1[restrict_region]
-        print('here0')
+    REQ_DATA0 = REQ_DATA1[restrict_region]
+print('here0')
 
-        if len(REQ_DATA0) <= 1000:  ## disable for now
-            continue
-        
-        valid_data = REQ_DATA0[REQ_DATA0['trip_length'] >= MAX_WAITING_TIME]
-        ORI_REQ_NUM = len(valid_data)
-        print('NUMREQ from valid_data:', ORI_REQ_NUM)
-        print('here1')
-        
-        node_to_num = {}
-        for node in set(valid_data['pickup_nodes']):
-            num = len(valid_data[valid_data['pickup_nodes'] == node])
-            node_to_num[node] = num
+##if len(REQ_DATA0) <= 1000:  ## disable for now
+##    continue
 
-        '''Removal of trips that possibly cause vehicles to be stuck for lengthened period'''
-        ##REMOVAL = 'None'  ## tmp
-        if REMOVAL != 'None':
-            pu_nodes = np.array(list(set(valid_data['pickup_nodes'])))
-            valid_dest = {}
-            for d_pid in set(valid_data['dropoff_nodes']):
-                d_waypoint = WayPoint(d_pid, d_pid, 0, 0)
-                dist_list = [mapsystem.distance(d_waypoint, WayPoint(o_pid, o_pid, 0, 0)) for o_pid in pu_nodes]
+valid_data = REQ_DATA0[REQ_DATA0['trip_length'] >= MAX_WAITING_TIME]
+ORI_REQ_NUM = len(valid_data)
+print('NUMREQ from valid_data:', ORI_REQ_NUM)
+print('here1')
 
-                num = sum([node_to_num[node] for node in pu_nodes[np.array(dist_list) <= MAX_WAITING_TIME - period_length]])
+node_to_num = {}
+for node in set(valid_data['pickup_nodes']):
+    num = len(valid_data[valid_data['pickup_nodes'] == node])
+    node_to_num[node] = num
 
-                if num not in valid_dest.keys():
-                    valid_dest[num] = []
+'''Removal of trips that possibly cause vehicles to be stuck for lengthened period'''
+##REMOVAL = 'None'  ## tmp
+if REMOVAL != 'None':
+    pu_nodes = np.array(list(set(valid_data['pickup_nodes'])))
+    valid_dest = {}
+    for d_pid in set(valid_data['dropoff_nodes']):
+        d_waypoint = WayPoint(d_pid, d_pid, 0, 0)
+        dist_list = [mapsystem.distance(d_waypoint, WayPoint(o_pid, o_pid, 0, 0)) for o_pid in pu_nodes]
 
-                valid_dest[num] += [d_pid]
+        num = sum([node_to_num[node] for node in pu_nodes[np.array(dist_list) <= MAX_WAITING_TIME - period_length]])
 
-            invalid_id = []
-            for num in sorted(list(valid_dest.keys())):
-                if num >= len(valid_data) / REMOVAL:
-                    break
+        if num not in valid_dest.keys():
+            valid_dest[num] = []
 
-                for node in valid_dest[num]:
-                    invalid_id += list(valid_data[valid_data['dropoff_nodes'] == node].index)
+        valid_dest[num] += [d_pid]
 
-            valid_data = valid_data.drop(invalid_id, axis=0)
+    invalid_id = []
+    for num in sorted(list(valid_dest.keys())):
+        if num >= len(valid_data) / REMOVAL:
+            break
 
-        '''Sample reasonable positions (e.g. non-deserted nodes) to generate vehicles'''
-        num_to_node = {}
-        for node in set(valid_data['pickup_nodes']):
-            num = len(valid_data[valid_data['pickup_nodes'] == node])
-            if num not in num_to_node.keys():
-                num_to_node[num] = []
+        for node in valid_dest[num]:
+            invalid_id += list(valid_data[valid_data['dropoff_nodes'] == node].index)
 
-            num_to_node[num] += [node]
+    valid_data = valid_data.drop(invalid_id, axis=0)
 
-        total_keynum = sum(num_to_node.keys())
-        print('here2')
+'''Sample reasonable positions (e.g. non-deserted nodes) to generate vehicles'''
+num_to_node = {}
+for node in set(valid_data['pickup_nodes']):
+    num = len(valid_data[valid_data['pickup_nodes'] == node])
+    if num not in num_to_node.keys():
+        num_to_node[num] = []
 
-        '''Choose 2 'popular' nodes based on trip (request) data'''
-        node_to_num = []
-        for node in set(valid_data['pickup_nodes']):
-            num = len(valid_data[valid_data['pickup_nodes'] == node])
-            node_to_num += [(num,node)]
-        
-        if len(node_to_num)>2: ## unpopular, rather
-            POPULAR_NODE1 = sorted(node_to_num)[0]
-            POPULAR_NODE2 = sorted(node_to_num)[1]
-        #----------------------------------------------------------------------
-        '''Weight types (to balance the efficiency-fairness effect)
-        1. Constant: w = [0] + list(np.linspace(.7,1,4)) + [.92, .95, .97]; weight_trial = [w for i in range(H)]
-        2. Increasing: w = np.linspace(0, .9, 10); weight_trial = np.linspace(w, 1, H)
-        3. Binary: w = [int(H - math.sqrt(H)), int(3/4*H), int(H/2), int(H/4)]; weight_trial = [0 for period in range(w)] + [1 for period in range(H-w)]'''
-        
-        print('here')
-        for w in [0]:  ##+ list(np.linspace(.7,1,4)) + [.92, .95, .97]:
+    num_to_node[num] += [node]
 
-            req_pos = 0
-            weight_trial = [w for i in range(H)]
-            
-            print('WEIGHT:', w)
+total_keynum = sum(num_to_node.keys())
+print('here2')
 
-            '''Reset V_STORAGE - array of vehicle objects'''
-            v_location = []
-            for num in num_to_node.keys():
-                freq = round(num/total_keynum*TAXI_TOTAL_NUM)
-                how_many_nodes = len(num_to_node[num])
-                
-                for node_id in num_to_node[num]:
-                    v_location += [manhat_point.loc[node_id, 'Coordinate'] for i in range(round(freq/how_many_nodes))]
-            
-            random.seed(0)
-            loc_id = [random.randint(0, len(v_location) - 1) for i in range(TAXI_TOTAL_NUM)]
-            V_STORAGE = np.array([Vehicle(i,v_location[loc_id[i]],CAPACITY) for i in range(TAXI_TOTAL_NUM)])    
-            
-            for vid in range(len(V_STORAGE)):  ## init location, set up V_STORAGE together with ^
-                v = V_STORAGE[vid]
-                v._point_id = closest_node(v._cur_position)
-                
-                if RANDOM_VEHICLE_POS_START == False:  ## start at 0, 0
-                    v._waypoint = WayPoint(v._point_id, v._point_id, 0., 0.)
-                else:
-                    v._waypoint = mapsystem.GEN_START_POINT(v._point_id, 60)
-                
-                v._arr_time = 0
-               
-            print('NUM OF TAXIS:', len(V_STORAGE))
+'''Choose 2 'popular' nodes based on trip (request) data'''
+node_to_num = []
+for node in set(valid_data['pickup_nodes']):
+    num = len(valid_data[valid_data['pickup_nodes'] == node])
+    node_to_num += [(num,node)]
 
-            '''Reset REQ_STORAGE - array of request objects'''
-            REQ_STORAGE = np.array([]) #store generated new requests
-            TEMP_STORAGE = []
-                
-            for i in valid_data.index:  ## valid_data: Database of trips --> TEMP_STORAGE
-                region = 'None'
-                origin = valid_data.loc[i, 'pickup_coordinates']
-                destination = valid_data.loc[i, 'dropoff_coordinates']
-                trip_length = valid_data.loc[i, 'trip_length']
-                arr_time = (valid_data.loc[i, 'arrival_time'] - HOUR*3600)//period_length*period_length
-                pass_count = valid_data.loc[i, ' passenger_count']
+if len(node_to_num)>2: ## unpopular, rather
+    POPULAR_NODE1 = sorted(node_to_num)[0]
+    POPULAR_NODE2 = sorted(node_to_num)[1]
+#----------------------------------------------------------------------
+'''Weight types (to balance the efficiency-fairness effect)
+1. Constant: w = [0] + list(np.linspace(.7,1,4)) + [.92, .95, .97]; weight_trial = [w for i in range(H)]
+2. Increasing: w = np.linspace(0, .9, 10); weight_trial = np.linspace(w, 1, H)
+3. Binary: w = [int(H - math.sqrt(H)), int(3/4*H), int(H/2), int(H/4)]; weight_trial = [0 for period in range(w)] + [1 for period in range(H-w)]'''
 
-                TEMP_STORAGE += [(arr_time, -trip_length, region, origin, destination, pass_count, i)]
-            TEMP_STORAGE.sort()
+print('here')
+##for w in [0]:  ##+ list(np.linspace(.7,1,4)) + [.92, .95, .97]:
+w = [0]
 
-            ## setting up new_requests --> REQ_STORAGE
-            for (arr_time, trip_length, region, origin, destination, pass_count, i) in TEMP_STORAGE:
-                req_ID = len(REQ_STORAGE)
+req_pos = 0
+weight_trial = [w for i in range(H)]
 
-                newreq = Request(req_ID, region, origin, destination, arr_time, pass_count)
+print('WEIGHT:', w)
 
-                p = valid_data.loc[i, 'pickup_nodes']
-                q = valid_data.loc[i, 'dropoff_nodes']
-                newreq._size = pass_count
-                newreq._origin_closest_node = p
-                newreq._destination_closest_node = q
-                newreq._origin_waypoint = WayPoint(p, p, 0., 0.)
-                newreq._destination_waypoint = WayPoint(q, q, 0., 0.)
-                newreq._trip_length = mapsystem.distance(newreq._origin_waypoint, newreq._destination_waypoint)
+'''Reset V_STORAGE - array of vehicle objects'''
+v_location = []
+for num in num_to_node.keys():
+    freq = round(num/total_keynum*TAXI_TOTAL_NUM)
+    how_many_nodes = len(num_to_node[num])
+    
+    for node_id in num_to_node[num]:
+        v_location += [manhat_point.loc[node_id, 'Coordinate'] for i in range(round(freq/how_many_nodes))]
 
-                newreq._max_waiting_time = MAX_WAITING_TIME
-                newreq._max_delay = newreq._max_waiting_time * 2
+random.seed(0)
+loc_id = [random.randint(0, len(v_location) - 1) for i in range(TAXI_TOTAL_NUM)]
+V_STORAGE = np.array([Vehicle(i,v_location[loc_id[i]],CAPACITY) for i in range(TAXI_TOTAL_NUM)])    
 
-                REQ_STORAGE = np.append(REQ_STORAGE, newreq)
+for vid in range(len(V_STORAGE)):  ## init location, set up V_STORAGE together with ^
+    v = V_STORAGE[vid]
+    v._point_id = closest_node(v._cur_position)
+    
+    if RANDOM_VEHICLE_POS_START == False:  ## start at 0, 0
+        v._waypoint = WayPoint(v._point_id, v._point_id, 0., 0.)
+    else:
+        v._waypoint = mapsystem.GEN_START_POINT(v._point_id, 60)
+    
+    v._arr_time = 0
+    
+print('NUM OF TAXIS:', len(V_STORAGE))
 
-            REQ_NUM = len(REQ_STORAGE)
-            print('NUM OF REQS:', REQ_NUM)
-            removal_rate = REQ_NUM/ORI_REQ_NUM
-            
-            '''STARTING SIMULATION'''
-            DEMAND_LIST = []
-            STACKED_ROUTE = [[] for i in range(TAXI_TOTAL_NUM)]
-            STACKED_TIME = [[] for i in range(TAXI_TOTAL_NUM)]
-            weight_list = weight_trial
+'''Reset REQ_STORAGE - array of request objects'''
+REQ_STORAGE = np.array([]) #store generated new requests
+TEMP_STORAGE = []
+    
+for i in valid_data.index:  ## valid_data: Database of trips --> TEMP_STORAGE
+    region = 'None'
+    origin = valid_data.loc[i, 'pickup_coordinates']
+    destination = valid_data.loc[i, 'dropoff_coordinates']
+    trip_length = valid_data.loc[i, 'trip_length']
+    arr_time = (valid_data.loc[i, 'arrival_time'] - HOUR*3600)//period_length*period_length
+    pass_count = valid_data.loc[i, ' passenger_count']
 
-            print('there')
-            ## what to do every period, itself
-            for h in trange(1, H+1, unit='period'):
-                v = V_STORAGE[34]
-                if v._assigned_requests: r = v._assigned_requests[0]
-                print('PERIOD', h)
-                print('===========================================')
-                
-                act_corr = weight_list[h-1]  ## fairness-eff. weight?
-                t = h*period_length  ## time past
-                FIN_ALLOC = {}
-                
-                DEMAND_LIST = [r for r in DEMAND_LIST if r._assigned == True]
-                
-                time0 = time.clock()
-                ILP_VALUE, ILP_DISCR, MIN_DRIVER = compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALLOC)
-                print('compute_routing t =', time.clock() - time0)
+    TEMP_STORAGE += [(arr_time, -trip_length, region, origin, destination, pass_count, i)]
+TEMP_STORAGE.sort()
 
-                print('v._allocated_value1:', v._allocated_value1)  ##
-                list_normal = [v._allocated_value1 for v in V_STORAGE] #i.e. store accumulated value (active time) for whole horizon
-                
-                print('normal')
-                print('std:', np.std(list_normal))
-                print('minmax:', (np.min(list_normal), np.max(list_normal)))
-                print('----')
-                
-                if h < H:  ## if not the last period, status_update
-                    t = (h+1)*period_length
-                    status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME)
-                
-                for r in REQ_STORAGE:  ##
-                    if r.is_picked:
-                        raise BaseException(f"{r._rid}")
+## setting up new_requests --> REQ_STORAGE
+for (arr_time, trip_length, region, origin, destination, pass_count, i) in TEMP_STORAGE:
+    req_ID = len(REQ_STORAGE)
 
-            served_reqs = [r._rid for r in REQ_STORAGE if (r._assigned == True or r._picked == True or r._finished == True)]
-            finished_reqs = [r for r in REQ_STORAGE if r._finished == True]
-            picked_reqs = [r for r in REQ_STORAGE if r._pickup_time != None]
+    newreq = Request(req_ID, region, origin, destination, arr_time, pass_count)
 
-            '''Recording Mean Waiting Time (request's perspective)'''
-            TOT_WAIT = 0
-            for r in picked_reqs:
-                TOT_WAIT += r._pickup_time - r._request_time
+    p = valid_data.loc[i, 'pickup_nodes']
+    q = valid_data.loc[i, 'dropoff_nodes']
+    newreq._size = pass_count
+    newreq._origin_closest_node = p
+    newreq._destination_closest_node = q
+    newreq._origin_waypoint = WayPoint(p, p, 0., 0.)
+    newreq._destination_waypoint = WayPoint(q, q, 0., 0.)
+    newreq._trip_length = mapsystem.distance(newreq._origin_waypoint, newreq._destination_waypoint)
 
-            MEAN_WAIT = TOT_WAIT/len(picked_reqs)
+    newreq._max_waiting_time = MAX_WAITING_TIME
+    newreq._max_delay = newreq._max_waiting_time * 2
 
-            '''Recording Mean Delay (request's perspective)'''
-            TOT_DELAY = 0
-            for r in finished_reqs:
-                TOT_DELAY += r._dropoff_time - (r._request_time + r._trip_length)
+    REQ_STORAGE = np.append(REQ_STORAGE, newreq)
 
-            if len(finished_reqs) == 0:
-                MEAN_DELAY = 0
-            else:
-                MEAN_DELAY = TOT_DELAY/len(finished_reqs)
+REQ_NUM = len(REQ_STORAGE)
+print('NUM OF REQS:', REQ_NUM)
+removal_rate = REQ_NUM/ORI_REQ_NUM
 
-            INTRIP_DELAY = 0
-            for r in finished_reqs:
-                INTRIP_DELAY += r._dropoff_time - r._pickup_time - r._trip_length
-            if len(finished_reqs) == 0:
-                MEAN_INTRIP = 0
-            else:
-                MEAN_INTRIP = INTRIP_DELAY/len(finished_reqs)
+'''STARTING SIMULATION'''
+DEMAND_LIST = []
+STACKED_ROUTE = [[] for i in range(TAXI_TOTAL_NUM)]
+STACKED_TIME = [[] for i in range(TAXI_TOTAL_NUM)]
+weight_list = weight_trial
+dct = globals()
 
-            '''Recording Service Rate'''
-            TOT_SERVED = len(served_reqs)
-            SERVICE_RATE = TOT_SERVED/len(REQ_STORAGE)
+# %%
+for k,v in dct.items(): globals()[k] = v
+print('there')
+## what to do every period, itself
+for h in trange(1, H+1, unit='period'):
+    v = V_STORAGE[34]
+    if v._assigned_requests: r = v._assigned_requests[0]
+    print('PERIOD', h)
+    print('===========================================')
+    
+    act_corr = weight_list[h-1]  ## fairness-eff. weight?
+    t = h*period_length  ## time past
+    FIN_ALLOC = {}
+    
+    DEMAND_LIST = [r for r in DEMAND_LIST if r._assigned == True]
+    
+    time0 = time.clock()
+    ILP_VALUE, ILP_DISCR, MIN_DRIVER = compute_routing(h, t, act_corr, V_STORAGE, REQ_STORAGE, DEMAND_LIST, FIN_ALLOC)
+    print('compute_routing t =', time.clock() - time0)
 
-            f = open('Tradeoff_w_Horizons.csv', 'a', newline = '')
-            to_append = [[DATA_TYPE, REMOVAL, removal_rate, MAX_WAITING_TIME, lat_min, HOUR, H, TAXI_TOTAL_NUM, REQ_NUM, weight_trial,
-                          TOT_SERVED, SERVICE_RATE, MEAN_WAIT, MEAN_DELAY, MEAN_INTRIP,
-                          np.sum(list_normal), np.std(list_normal), np.min(list_normal), np.max(list_normal), day]]
-            writer = csv.writer(f)
-            writer.writerows(to_append)
-            f.close()
+    print('v._allocated_value1:', v._allocated_value1)  ##
+    list_normal = [v._allocated_value1 for v in V_STORAGE] #i.e. store accumulated value (active time) for whole horizon
+    
+    print('normal')
+    print('std:', np.std(list_normal))
+    print('minmax:', (np.min(list_normal), np.max(list_normal)))
+    print('----')
+    
+    if h < H:  ## if not the last period, status_update
+        t = (h+1)*period_length
+        status_update(t, V_STORAGE, FIN_ALLOC, STACKED_ROUTE, STACKED_TIME)
+    
+    for r in REQ_STORAGE:  ##
+        if r.is_picked:
+            raise BaseException(f"{r._rid}")
 
-            '''Record list_normal as column'''
-            f = open('ActiveTime.csv', 'a', newline = '')
-            to_append = [list_normal]
-            writer = csv.writer(f)
-            writer.writerows(to_append)
-            f.close()
+served_reqs = [r._rid for r in REQ_STORAGE if (r._assigned == True or r._picked == True or r._finished == True)]
+finished_reqs = [r for r in REQ_STORAGE if r._finished == True]
+picked_reqs = [r for r in REQ_STORAGE if r._pickup_time != None]
+
+'''Recording Mean Waiting Time (request's perspective)'''
+TOT_WAIT = 0
+for r in picked_reqs:
+    TOT_WAIT += r._pickup_time - r._request_time
+
+MEAN_WAIT = TOT_WAIT/len(picked_reqs)
+
+'''Recording Mean Delay (request's perspective)'''
+TOT_DELAY = 0
+for r in finished_reqs:
+    TOT_DELAY += r._dropoff_time - (r._request_time + r._trip_length)
+
+if len(finished_reqs) == 0:
+    MEAN_DELAY = 0
+else:
+    MEAN_DELAY = TOT_DELAY/len(finished_reqs)
+
+INTRIP_DELAY = 0
+for r in finished_reqs:
+    INTRIP_DELAY += r._dropoff_time - r._pickup_time - r._trip_length
+if len(finished_reqs) == 0:
+    MEAN_INTRIP = 0
+else:
+    MEAN_INTRIP = INTRIP_DELAY/len(finished_reqs)
+
+'''Recording Service Rate'''
+TOT_SERVED = len(served_reqs)
+SERVICE_RATE = TOT_SERVED/len(REQ_STORAGE)
+
+f = open('Tradeoff_w_Horizons.csv', 'a', newline = '')
+to_append = [[DATA_TYPE, REMOVAL, removal_rate, MAX_WAITING_TIME, lat_min, HOUR, H, TAXI_TOTAL_NUM, REQ_NUM, weight_trial,
+                TOT_SERVED, SERVICE_RATE, MEAN_WAIT, MEAN_DELAY, MEAN_INTRIP,
+                np.sum(list_normal), np.std(list_normal), np.min(list_normal), np.max(list_normal), day]]
+writer = csv.writer(f)
+writer.writerows(to_append)
+f.close()
+
+'''Record list_normal as column'''
+f = open('ActiveTime.csv', 'a', newline = '')
+to_append = [list_normal]
+writer = csv.writer(f)
+writer.writerows(to_append)
+f.close()
 
 # %%

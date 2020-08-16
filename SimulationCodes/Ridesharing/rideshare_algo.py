@@ -268,6 +268,7 @@ def mine(h, H:int, eff_matrix, carb_matrix):
     efficiency_orig = eff_matrix[row_ind, vehicles].sum()
     carbon_orig = carb_matrix[row_ind, vehicles].sum()
     vehicles = vehicles.tolist()
+    last_low = carbon_orig, efficiency_orig, row_ind, vehicles
     #print(f'M_eff : {carbon_orig:8.3f} {efficiency_orig:8.3f}', np.array(vehicles) if verbose else '')
 
 
@@ -276,7 +277,7 @@ def mine(h, H:int, eff_matrix, carb_matrix):
     efficiency_mcarb = eff_matrix[row_ind_mcarb, vehicles_mcarb].sum()
     carbon_mcarb = carb_matrix[row_ind_mcarb, vehicles_mcarb].sum()
     vehicles_mcarb = vehicles_mcarb.tolist()
-
+    last_hi = carbon_mcarb, efficiency_mcarb, row_ind_mcarb, vehicles_mcarb
 
     low = 0.00
     hi = 1.e5
