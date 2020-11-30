@@ -5,7 +5,7 @@ import random
 import time
 import datetime
 
-import bipartite_algo
+##import bipartite_algo
 from request import *
 from vehicle import *
 from Waypoint import WayPoint, MapSystem
